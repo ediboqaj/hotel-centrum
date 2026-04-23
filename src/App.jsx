@@ -64,7 +64,7 @@ function AppContent() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Layout />}>
-          <Route index element={<ProtectedRoute pageKey="dashboard"><Dashboard /></ProtectedRoute>} />
+          <Route index element={<ProtectedRoute pageKey="housekeeping"><Housekeeping /></ProtectedRoute>} />
           <Route path="bookings" element={<ProtectedRoute pageKey="bookings"><Bookings /></ProtectedRoute>} />
           <Route path="calendar" element={<ProtectedRoute pageKey="calendar"><Calendar /></ProtectedRoute>} />
           <Route path="housekeeping" element={<ProtectedRoute pageKey="housekeeping"><Housekeeping /></ProtectedRoute>} />

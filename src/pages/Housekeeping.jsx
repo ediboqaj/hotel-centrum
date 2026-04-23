@@ -30,12 +30,13 @@ const CLEANER_ACTIONS = {
 // Full workflow for managers/admins/reception
 const MANAGER_ACTIONS = {
   dirty:         [{ key: 'in-progress', label: '▶ Fillo' }],
-  'in-progress': [{ key: 'cleaned',     label: '✓ E pastruar' },
-                  { key: 'dirty',       label: '← E ndotur' }],
-  cleaned:       [{ key: 'inspected',   label: '✓ Inspekto' },
-                  { key: 'dirty',       label: '← Ripastro' }],
-  inspected:     [{ key: 'dirty',       label: '← E ndotur' }],
-  none:          [{ key: 'dirty',       label: '○ Shëno si të ndotur' }],
+  'in-progress': [{ key: 'cleaned',     label: '✓ E Pastruar' },
+                  { key: 'dirty',       label: '← E Pa pastruar' }],
+  cleaned:       [{ key: 'dirty',       label: '← E Pa pastruar' }],
+  inspected:     [{ key: 'dirty',       label: '← E Pa pastruar' }],
+  none:          [{ key: 'dirty',       label: '○ E Pa pastruar' },
+                  { key: 'in-progress', label: '▶ Fillo' },
+                  { key: 'cleaned',     label: '✓ E Pastruar' }],
 }
 
 function formatTime(isoString) {
@@ -57,7 +58,7 @@ function statusLabel(key) {
 export default function Housekeeping() {
   const { rooms, latestLogs, loading, error, logStatus } = useHousekeeping()
   const { staff } = useAuth()
-  const [filter, setFilter] = useState('attention')
+  const [filter, setFilter] = useState('all')
   const [collapsedFloors, setCollapsedFloors] = useState({})
   const [selectedRoom, setSelectedRoom] = useState(null)
   const [actionInProgress, setActionInProgress] = useState(null)
@@ -87,14 +88,10 @@ export default function Housekeeping() {
   HK_STATUSES.forEach(s => {
     counts[s.key] = roomsWithHk.filter(r => r.hkStatus === s.key).length
   })
-  counts.attention = roomsWithHk.filter(r =>
-    r.hkStatus === 'dirty' || r.hkStatus === 'in-progress' || r.hkStatus === 'none'
-  ).length
 
   // Apply filter
-  const filtered = filter === 'all' ? roomsWithHk
-    : filter === 'attention' ? roomsWithHk.filter(r =>
-        r.hkStatus === 'dirty' || r.hkStatus === 'in-progress' || r.hkStatus === 'none')
+  const filtered = filter === 'all'
+    ? roomsWithHk
     : roomsWithHk.filter(r => r.hkStatus === filter)
 
   // Group by building → floor
@@ -130,26 +127,17 @@ export default function Housekeeping() {
       {/* Filter chips */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
         <FilterChip
-          label="Kërkon vëmendje" count={counts.attention} color="#b45309"
-          active={filter === 'attention'}
-          onClick={() => setFilter('attention')}
-        />
-        <FilterChip
           label="Të gjitha" count={counts.all} color="#64748b"
           active={filter === 'all'}
           onClick={() => setFilter('all')}
         />
         {HK_STATUSES
-          .filter(s => {
-            // Cleaners only see dirty + cleaned filter chips
-            if (isCleaner) return s.key === 'dirty' || s.key === 'cleaned'
-            return true
-          })
+          .filter(s => s.key !== 'inspected')  // Hide Inspected for v1
           .map(s => (
             <FilterChip
               key={s.key} label={s.label} count={counts[s.key]} color={s.color}
               active={filter === s.key}
-              onClick={() => setFilter(filter === s.key ? 'attention' : s.key)}
+              onClick={() => setFilter(filter === s.key ? 'all' : s.key)}
             />
           ))}
       </div>
@@ -161,8 +149,8 @@ export default function Housekeeping() {
           background: 'var(--surface)', borderRadius: 10,
           border: '1px solid var(--border)',
         }}>
-          {filter === 'attention'
-            ? '🎉 Të gjitha dhomat janë të pastra!'
+          {filter === 'all'
+            ? 'Asnjë dhomë'
             : `Asnjë dhomë me këtë status`}
         </div>
       )}
@@ -285,10 +273,12 @@ export default function Housekeeping() {
           borderTop: `3px solid ${selectedStyle.color}`,
           boxShadow: '0 -8px 30px rgba(0,0,0,0.12)',
           padding: '14px 20px',
+          paddingBottom: 'calc(76px + env(safe-area-inset-bottom, 0px))',
           display: 'flex', alignItems: 'center', gap: 14,
           flexWrap: 'wrap',
-          zIndex: 100,
+          zIndex: 200,
         }}>
+
           <div style={{
             width: 48, height: 48, borderRadius: 10,
             background: selectedStyle.bg,
@@ -346,7 +336,7 @@ export default function Housekeeping() {
         </div>
       )}
 
-      {selected && <div style={{ height: 80 }} />}
+      {selected && <div style={{ height: 160 }} />}
     </div>
   )
 }

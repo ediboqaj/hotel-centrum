@@ -11,13 +11,9 @@ export const NAV_ITEMS = [
   { key: 'staff',        label: 'Staff',         icon: '◐', path: '/staff' },
 ]
 
-// Role-based access control
 export const ROLE_ACCESS = {
-  // Production roles (active in v1)
-  reception: ['dashboard', 'housekeeping', 'minibar'],
-  cleaner:   ['dashboard', 'housekeeping', 'minibar'],
-
-  // Roles preserved in code but no users assigned (for future re-enablement)
+  reception: ['housekeeping', 'minibar'],
+  cleaner:   ['housekeeping', 'minibar'],
   admin:     ['dashboard', 'bookings', 'calendar', 'housekeeping', 'minibar', 'reports', 'staff'],
   manager:   ['dashboard', 'bookings', 'calendar', 'housekeeping', 'minibar', 'reports', 'staff'],
 }
