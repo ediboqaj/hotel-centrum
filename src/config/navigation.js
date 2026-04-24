@@ -12,7 +12,7 @@ export const NAV_ITEMS = [
 ]
 
 export const ROLE_ACCESS = {
-  reception: ['housekeeping', 'minibar'],
+  reception: ['housekeeping', 'minibar', 'reports'],
   cleaner:   ['housekeeping', 'minibar'],
   admin:     ['dashboard', 'bookings', 'calendar', 'housekeeping', 'minibar', 'reports', 'staff'],
   manager:   ['dashboard', 'bookings', 'calendar', 'housekeeping', 'minibar', 'reports', 'staff'],

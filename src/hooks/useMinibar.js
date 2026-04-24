@@ -115,10 +115,21 @@ export function useMinibar() {
     if (error) return { error: error.message }
     return { ok: true }
   }
+  // Cleaner action: delete a mistaken report (only if not yet acknowledged)
+  const deleteReport = async (reportId) => {
+    const { error } = await supabase
+      .from('minibar_consumption')
+      .delete()
+      .eq('id', reportId)
+      .eq('report_status', 'reported') // safety: can't delete acknowledged ones
+
+    if (error) return { error: error.message }
+    return { ok: true }
+  }
 
   return {
     products, rooms, reports,
     loading, error,
-    reportMissing, acknowledgeReport, acknowledgeAllForRoom,
+    reportMissing, acknowledgeReport, acknowledgeAllForRoom, deleteReport,
   }
 }

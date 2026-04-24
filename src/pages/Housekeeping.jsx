@@ -16,27 +16,19 @@ const BUILDING_NAMES = {
   ri: 'Hoteli i Ri',
 }
 
-// Simple two-button workflow for cleaners
-const CLEANER_ACTIONS = {
-  dirty:         [{ key: 'cleaned', label: '✓ E Pastruar' }],
-  'in-progress': [{ key: 'cleaned', label: '✓ E Pastruar' },
-                  { key: 'dirty',   label: '← E Pa pastruar' }],
-  cleaned:       [{ key: 'dirty',   label: '← E Pa pastruar' }],
-  inspected:     [{ key: 'dirty',   label: '← E Pa pastruar' }],
-  none:          [{ key: 'dirty',   label: '○ E Pa pastruar' },
-                  { key: 'cleaned', label: '✓ E Pastruar' }],
+const CLEANING_TYPES = [
+  { key: 'komplet', label: 'Komplet dhoma' },
+  { key: 'pastrim', label: 'Pastrim' },
+]
+
+const RECEPTION_ACTIONS = {
+  dirty: [], 'in-progress': [], cleaned: [], inspected: [], none: [],
 }
 
-// Full workflow for managers/admins/reception
-const MANAGER_ACTIONS = {
-  dirty:         [{ key: 'in-progress', label: '▶ Fillo' }],
-  'in-progress': [{ key: 'cleaned',     label: '✓ E Pastruar' },
-                  { key: 'dirty',       label: '← E Pa pastruar' }],
-  cleaned:       [{ key: 'dirty',       label: '← E Pa pastruar' }],
-  inspected:     [{ key: 'dirty',       label: '← E Pa pastruar' }],
-  none:          [{ key: 'dirty',       label: '○ E Pa pastruar' },
-                  { key: 'in-progress', label: '▶ Fillo' },
-                  { key: 'cleaned',     label: '✓ E Pastruar' }],
+const CLEANER_ACTIONS = {
+  dirty:         [{ key: 'in-progress', label: '▶ Fillo', needsType: false }],
+  'in-progress': [{ key: 'cleaned',     label: '✓ E Pastruar', needsType: false }],
+  cleaned: [], inspected: [], none: [],
 }
 
 function formatTime(isoString) {
@@ -55,15 +47,25 @@ function statusLabel(key) {
   return HK_STATUSES.find(s => s.key === key)?.label || key
 }
 
+function cleaningTypeLabel(notes) {
+  if (!notes) return null
+  if (notes === 'komplet') return 'Komplet dhoma'
+  if (notes === 'pastrim') return 'Pastrim'
+  return notes
+}
+
 export default function Housekeeping() {
   const { rooms, latestLogs, loading, error, logStatus } = useHousekeeping()
   const { staff } = useAuth()
   const [filter, setFilter] = useState('all')
+  const [typeFilter, setTypeFilter] = useState('all')
   const [collapsedFloors, setCollapsedFloors] = useState({})
   const [selectedRoom, setSelectedRoom] = useState(null)
+  const [pendingAction, setPendingAction] = useState(null)
   const [actionInProgress, setActionInProgress] = useState(null)
 
   const isCleaner = staff?.role === 'cleaner'
+  const isReception = staff?.role === 'reception'
   const canManage = ['admin', 'manager', 'reception', 'cleaner'].includes(staff?.role)
 
   if (loading) return <div style={{ color: 'var(--muted)' }}>Duke u ngarkuar...</div>
@@ -73,28 +75,29 @@ export default function Housekeeping() {
     </div>
   )
 
-  // Enrich rooms with HK status
   const roomsWithHk = rooms.map(r => {
     const log = latestLogs[r.id]
-    return {
-      ...r,
-      hkStatus: log?.status || 'none',
-      lastLog: log,
-    }
+    return { ...r, hkStatus: log?.status || 'none', lastLog: log }
   })
 
-  // Counts
   const counts = { all: rooms.length }
   HK_STATUSES.forEach(s => {
     counts[s.key] = roomsWithHk.filter(r => r.hkStatus === s.key).length
   })
 
-  // Apply filter
-  const filtered = filter === 'all'
+  const typeCounts = {
+    komplet: roomsWithHk.filter(r => r.lastLog?.notes === 'komplet').length,
+    pastrim: roomsWithHk.filter(r => r.lastLog?.notes === 'pastrim').length,
+  }
+
+  const afterStatusFilter = filter === 'all'
     ? roomsWithHk
     : roomsWithHk.filter(r => r.hkStatus === filter)
 
-  // Group by building → floor
+  const filtered = typeFilter === 'all'
+    ? afterStatusFilter
+    : afterStatusFilter.filter(r => r.lastLog?.notes === typeFilter)
+
   const buildings = {}
   filtered.forEach(r => {
     const bldg = r.building || 'unknown'
@@ -105,9 +108,20 @@ export default function Housekeeping() {
   const buildingOrder = ['vjeter', 'ri']
   const visibleBuildings = buildingOrder.filter(b => buildings[b])
 
-  const handleAction = async (roomId, newStatus) => {
-    setActionInProgress(roomId)
-    await logStatus(roomId, newStatus)
+  const handleActionTap = (action) => {
+    if (action.needsType) {
+      setPendingAction(action)
+    } else {
+      executeAction(action.key, null)
+    }
+  }
+
+  const executeAction = async (statusKey, cleaningType) => {
+    if (!selectedRoom) return
+    setActionInProgress(selectedRoom)
+    setPendingAction(null)
+    const typeToLog = cleaningType || selected?.lastLog?.notes || null
+    await logStatus(selectedRoom, statusKey, typeToLog)
     setActionInProgress(null)
     setSelectedRoom(null)
   }
@@ -122,17 +136,33 @@ export default function Housekeeping() {
     ? HK_STATUSES.find(s => s.key === selected.hkStatus) || NONE_STYLE
     : null
 
+  const getActions = (hkStatus) => {
+    if (isCleaner) return CLEANER_ACTIONS[hkStatus] || []
+    if (isReception) return RECEPTION_ACTIONS[hkStatus] || []
+    return CLEANER_ACTIONS[hkStatus] || []
+  }
+
+  const cleanerIsBlocked = isCleaner && selected &&
+    !['dirty', 'in-progress'].includes(selected.hkStatus)
+
+  const getReceptionDirtyButton = (hkStatus) => {
+    if (!isReception) return null
+    if (hkStatus === 'none' || hkStatus === 'cleaned' || hkStatus === 'inspected') {
+      return { key: 'dirty', label: 'E Pa pastruar', needsType: true }
+    }
+    return null
+  }
+
   return (
     <div>
-      {/* Filter chips */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+      {/* Status filter chips */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
         <FilterChip
           label="Të gjitha" count={counts.all} color="#64748b"
-          active={filter === 'all'}
-          onClick={() => setFilter('all')}
+          active={filter === 'all'} onClick={() => setFilter('all')}
         />
         {HK_STATUSES
-          .filter(s => s.key !== 'inspected')  // Hide Inspected for v1
+          .filter(s => s.key !== 'inspected')
           .map(s => (
             <FilterChip
               key={s.key} label={s.label} count={counts[s.key]} color={s.color}
@@ -142,6 +172,20 @@ export default function Housekeeping() {
           ))}
       </div>
 
+      {/* Type filter chips */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+        <FilterChip
+          label="Komplet dhoma" count={typeCounts.komplet} color="#0f172a"
+          active={typeFilter === 'komplet'}
+          onClick={() => setTypeFilter(typeFilter === 'komplet' ? 'all' : 'komplet')}
+        />
+        <FilterChip
+          label="Pastrim" count={typeCounts.pastrim} color="#475569"
+          active={typeFilter === 'pastrim'}
+          onClick={() => setTypeFilter(typeFilter === 'pastrim' ? 'all' : 'pastrim')}
+        />
+      </div>
+
       {/* Empty state */}
       {filtered.length === 0 && (
         <div style={{
@@ -149,13 +193,11 @@ export default function Housekeeping() {
           background: 'var(--surface)', borderRadius: 10,
           border: '1px solid var(--border)',
         }}>
-          {filter === 'all'
-            ? 'Asnjë dhomë'
-            : `Asnjë dhomë me këtë status`}
+          Asnjë dhomë me këtë status
         </div>
       )}
 
-      {/* Buildings → Floors */}
+      {/* Buildings → Floors → Rooms */}
       {visibleBuildings.map(building => {
         const floorMap = buildings[building]
         const floorNumbers = Object.keys(floorMap).map(Number).sort()
@@ -163,12 +205,10 @@ export default function Housekeeping() {
 
         return (
           <div key={building} style={{ marginBottom: 28 }}>
-            {/* Building header — only show if more than 1 building visible */}
             {visibleBuildings.length > 1 && (
               <div style={{
                 display: 'flex', alignItems: 'baseline', gap: 10,
-                marginBottom: 12,
-                paddingBottom: 6,
+                marginBottom: 12, paddingBottom: 6,
                 borderBottom: '2px solid var(--border)',
               }}>
                 <span style={{ fontWeight: 700, fontSize: 15 }}>
@@ -189,16 +229,14 @@ export default function Housekeeping() {
                   <div
                     onClick={() => toggleFloor(building, floor)}
                     style={{
-                      display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10,
-                      cursor: 'pointer', padding: '4px 0',
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      marginBottom: 10, cursor: 'pointer', padding: '4px 0',
                     }}
                   >
                     <span style={{ fontSize: 11, color: 'var(--muted)', width: 14 }}>
                       {isCollapsed ? '▶' : '▼'}
                     </span>
-                    <span style={{ fontWeight: 600, fontSize: 13 }}>
-                      Kati {floor}
-                    </span>
+                    <span style={{ fontWeight: 600, fontSize: 13 }}>Kati {floor}</span>
                     <span style={{ fontSize: 11, color: 'var(--muted)' }}>
                       {floorRooms.length} {floorRooms.length === 1 ? 'dhomë' : 'dhoma'}
                     </span>
@@ -214,6 +252,7 @@ export default function Housekeeping() {
                         const style = HK_STATUSES.find(s => s.key === room.hkStatus) || NONE_STYLE
                         const isSelected = selectedRoom === room.id
                         const timeAgo = formatTime(room.lastLog?.logged_at)
+                        const typeLabel = cleaningTypeLabel(room.lastLog?.notes)
 
                         return (
                           <div
@@ -222,11 +261,9 @@ export default function Housekeeping() {
                             style={{
                               background: style.bg,
                               border: `2px solid ${isSelected ? 'var(--accent)' : style.border}`,
-                              borderRadius: 8,
-                              padding: 10,
+                              borderRadius: 8, padding: 10,
                               cursor: canManage ? 'pointer' : 'default',
                               transition: 'all 0.15s',
-                              position: 'relative',
                             }}
                           >
                             <div style={{
@@ -241,15 +278,24 @@ export default function Housekeeping() {
                               textTransform: 'uppercase', letterSpacing: '0.4px',
                               marginTop: 3,
                             }}>
-                              {room.hkStatus === 'none' ? 'pa regjistrim' : statusLabel(room.hkStatus)}
+                              {statusLabel(room.hkStatus)}
                             </div>
+                            {typeLabel && (
+                              <div style={{
+                                fontSize: 9, color: style.color, opacity: 0.6,
+                                marginTop: 2, fontStyle: 'italic',
+                              }}>
+                                {typeLabel}
+                              </div>
+                            )}
                             {timeAgo && (
                               <div style={{
                                 fontSize: 10, color: style.color, opacity: 0.7,
-                                marginTop: 3,
+                                marginTop: 2,
                               }}>
-                                {timeAgo} {room.lastLog?.cleaner?.name
-                                  && `· ${room.lastLog.cleaner.name.split(' ')[0]}`}
+                                {timeAgo}
+                                {room.lastLog?.cleaner?.name
+                                  && ` · ${room.lastLog.cleaner.name.split(' ')[0]}`}
                               </div>
                             )}
                           </div>
@@ -264,7 +310,7 @@ export default function Housekeeping() {
         )
       })}
 
-      {/* Bottom action bar */}
+      {/* ── Bottom action bar ── */}
       {selected && canManage && (
         <div style={{
           position: 'fixed',
@@ -274,69 +320,157 @@ export default function Housekeeping() {
           boxShadow: '0 -8px 30px rgba(0,0,0,0.12)',
           padding: '14px 20px',
           paddingBottom: 'calc(76px + env(safe-area-inset-bottom, 0px))',
-          display: 'flex', alignItems: 'center', gap: 14,
-          flexWrap: 'wrap',
           zIndex: 200,
         }}>
 
+          {/* Room info */}
           <div style={{
-            width: 48, height: 48, borderRadius: 10,
-            background: selectedStyle.bg,
-            border: `2px solid ${selectedStyle.border}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 18, fontWeight: 700, color: selectedStyle.color,
-            flexShrink: 0,
+            display: 'flex', alignItems: 'center', gap: 14,
+            marginBottom: 10, flexWrap: 'wrap',
           }}>
-            {selected.number}
+            <div style={{
+              width: 48, height: 48, borderRadius: 10,
+              background: selectedStyle.bg,
+              border: `2px solid ${selectedStyle.border}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 18, fontWeight: 700, color: selectedStyle.color,
+              flexShrink: 0,
+            }}>
+              {selected.number}
+            </div>
+
+            <div style={{ flex: 1, minWidth: 100 }}>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>
+                Dhoma {selected.number}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                {statusLabel(selected.hkStatus)}
+                {selected.lastLog?.notes && ` · ${cleaningTypeLabel(selected.lastLog.notes)}`}
+                {selected.lastLog && ` · ${formatTime(selected.lastLog.logged_at)}`}
+                {selected.lastLog?.cleaner?.name && ` · ${selected.lastLog.cleaner.name}`}
+              </div>
+            </div>
+
+            {!pendingAction && (
+              <button
+                onClick={() => { setSelectedRoom(null); setPendingAction(null) }}
+                style={{
+                  padding: '9px 12px', fontSize: 18, color: 'var(--muted)',
+                  background: 'transparent', cursor: 'pointer',
+                }}
+              >
+                ✕
+              </button>
+            )}
           </div>
 
-          <div style={{ flex: 1, minWidth: 120 }}>
-            <div style={{ fontWeight: 600, fontSize: 14 }}>
-              Dhoma {selected.number}
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-              {statusLabel(selected.hkStatus)}
-              {selected.lastLog && ` · ${formatTime(selected.lastLog.logged_at)}`}
-              {selected.lastLog?.cleaner?.name && ` · ${selected.lastLog.cleaner.name}`}
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {((isCleaner ? CLEANER_ACTIONS : MANAGER_ACTIONS)[selected.hkStatus] || []).map(action => {
-              const actStyle = HK_STATUSES.find(s => s.key === action.key) || NONE_STYLE
-              return (
+          {/* Type picker */}
+          {pendingAction && (
+            <div>
+              <div style={{
+                fontSize: 12, fontWeight: 600, color: 'var(--muted)',
+                textTransform: 'uppercase', letterSpacing: '0.5px',
+                marginBottom: 10,
+              }}>
+                Zgjidh llojin e pastrimit:
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {CLEANING_TYPES.map(type => (
+                  <button
+                    key={type.key}
+                    onClick={() => executeAction(pendingAction.key, type.key)}
+                    disabled={actionInProgress === selectedRoom}
+                    style={{
+                      padding: '12px 20px', fontSize: 14, fontWeight: 700,
+                      background: type.key === 'komplet' ? '#0f172a' : '#f1f5f9',
+                      color: type.key === 'komplet' ? '#fff' : 'var(--text)',
+                      border: `2px solid ${type.key === 'komplet' ? '#0f172a' : 'var(--border)'}`,
+                      borderRadius: 10, cursor: 'pointer',
+                      flex: 1, minWidth: 120,
+                      opacity: actionInProgress === selectedRoom ? 0.5 : 1,
+                    }}
+                  >
+                    {type.label}
+                  </button>
+                ))}
                 <button
-                  key={action.key}
-                  onClick={() => handleAction(selected.id, action.key)}
-                  disabled={actionInProgress === selected.id}
+                  onClick={() => setPendingAction(null)}
                   style={{
-                    padding: '9px 14px', fontSize: 13, fontWeight: 600,
-                    background: actStyle.bg,
-                    color: actStyle.color,
-                    border: `1px solid ${actStyle.border}`,
+                    padding: '12px 16px', fontSize: 13,
+                    background: 'transparent', color: 'var(--muted)',
+                    border: '1px solid var(--border)', borderRadius: 10,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Action buttons */}
+          {!pendingAction && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+
+              {/* Cleaner blocked message */}
+              {cleanerIsBlocked && (
+                <div style={{
+                  fontSize: 12, color: 'var(--muted)',
+                  padding: '8px 12px',
+                  background: '#f8fafc',
+                  border: '1px solid var(--border)',
+                  borderRadius: 8, lineHeight: 1.5,
+                }}>
+                  Recepsioni duhet ta shënojë dhomën si{' '}
+                  <strong>E Pa pastruar</strong> para se të filloni pastrimin.
+                </div>
+              )}
+
+              {/* Reception E Pa pastruar button */}
+              {isReception && getReceptionDirtyButton(selected.hkStatus) && (
+                <button
+                  onClick={() => handleActionTap(getReceptionDirtyButton(selected.hkStatus))}
+                  disabled={actionInProgress === selectedRoom}
+                  style={{
+                    padding: '9px 16px', fontSize: 13, fontWeight: 600,
+                    background: '#fee2e2', color: '#b91c1c',
+                    border: '1px solid #fecaca',
                     borderRadius: 8, cursor: 'pointer',
-                    opacity: actionInProgress === selected.id ? 0.5 : 1,
+                    opacity: actionInProgress === selectedRoom ? 0.5 : 1,
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {action.label}
+                  E Pa pastruar
                 </button>
-              )
-            })}
-            <button
-              onClick={() => setSelectedRoom(null)}
-              style={{
-                padding: '9px 12px', fontSize: 18, color: 'var(--muted)',
-                background: 'transparent', cursor: 'pointer',
-              }}
-            >
-              ✕
-            </button>
-          </div>
+              )}
+
+              {/* Regular action buttons */}
+              {!cleanerIsBlocked && getActions(selected.hkStatus).map(action => {
+                const actStyle = HK_STATUSES.find(s => s.key === action.key) || NONE_STYLE
+                return (
+                  <button
+                    key={action.key}
+                    onClick={() => handleActionTap(action)}
+                    disabled={actionInProgress === selectedRoom}
+                    style={{
+                      padding: '9px 16px', fontSize: 13, fontWeight: 600,
+                      background: actStyle.bg, color: actStyle.color,
+                      border: `1px solid ${actStyle.border}`,
+                      borderRadius: 8, cursor: 'pointer',
+                      opacity: actionInProgress === selectedRoom ? 0.5 : 1,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {action.label}
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 
-      {selected && <div style={{ height: 160 }} />}
+      {selected && <div style={{ height: 180 }} />}
     </div>
   )
 }
@@ -352,8 +486,7 @@ function FilterChip({ label, count, color, active, onClick }) {
         border: `1px solid ${active ? color : 'var(--border)'}`,
         borderRadius: 20,
         display: 'inline-flex', alignItems: 'center', gap: 6,
-        cursor: 'pointer',
-        transition: 'all 0.15s',
+        cursor: 'pointer', transition: 'all 0.15s',
       }}
     >
       {label}
